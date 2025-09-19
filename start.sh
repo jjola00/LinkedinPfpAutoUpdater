@@ -18,9 +18,9 @@ else
         npm install
     fi
     
-    # Check if .env exists
-    if [ ! -f ".env" ]; then
-        echo "⚠️  .env file not found. Please run ./install.sh first"
+    # Check if .env exists in project root
+    if [ ! -f "../.env" ]; then
+        echo "⚠️  .env file not found in project root. Please run ./install.sh first"
         exit 1
     fi
     

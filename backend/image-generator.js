@@ -3,7 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
-require('dotenv').config();
+require('dotenv').config({ path: '../.env' });
 
 class ImageGenerator {
   constructor() {

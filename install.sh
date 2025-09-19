@@ -32,12 +32,12 @@ fi
 
 echo "✅ Backend dependencies installed"
 
-# Check for .env file
-if [ ! -f ".env" ]; then
-    echo "⚠️  .env file not found. Creating from template..."
-    cp env.example .env
-    echo "📝 Please edit backend/.env and add your OpenAI API key:"
-    echo "   AI_API_KEY=your_openai_api_key_here"
+# Check for .env file in project root
+if [ ! -f "../.env" ]; then
+    echo "⚠️  .env file not found in project root. Creating from template..."
+    cp ../.env.example ../.env
+    echo "📝 Please edit .env in project root and add your AI API key:"
+    echo "   AI_API_KEY=your_api_key_here"
     echo ""
     echo "   You can get an API key from: https://platform.openai.com/api-keys"
     echo ""
@@ -45,10 +45,17 @@ if [ ! -f ".env" ]; then
 fi
 
 # Check if API key is set
-if grep -q "your_openai_api_key_here" .env; then
-    echo "⚠️  Please update your OpenAI API key in backend/.env"
-    echo "   Current value: AI_API_KEY=your_openai_api_key_here"
+if grep -q "your_api_key_here" ../.env; then
+    echo "⚠️  Please update your OpenAI API key in .env (project root)"
+    echo "   Current value: AI_API_KEY=your_api_key_here"
     echo "   Replace with your actual API key"
+    exit 1
+fi
+
+# Check if API key looks valid (starts with sk-)
+if ! grep -q "AI_API_KEY=sk-" ../.env; then
+    echo "⚠️  API key doesn't look valid. Please check your .env file"
+    echo "   Expected format: AI_API_KEY=sk-..."
     exit 1
 fi
 

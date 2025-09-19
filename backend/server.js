@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { ImageGenerator } = require('./image-generator');
+require('dotenv').config({ path: '../.env' });
 
 class ImageGenerationServer {
   constructor() {

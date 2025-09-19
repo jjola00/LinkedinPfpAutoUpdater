@@ -1,4 +1,5 @@
 // Test script for backend functionality
+require('dotenv').config({ path: '../.env' });
 const { ImageGenerator } = require('./image-generator');
 const fs = require('fs').promises;
 const path = require('path');
