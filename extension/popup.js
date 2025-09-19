@@ -20,9 +20,13 @@ class PopupController {
         numImages: 10,
         currentImageIndex: 0,
         lastUpdate: null,
-        storagePath: './generated-images',
-        basePhoto: null
+        storagePath: './generated-images'
       });
+      
+      // Load base photo from local storage (larger quota)
+      const localResult = await chrome.storage.local.get(['basePhoto']);
+      result.basePhoto = localResult.basePhoto || null;
+      
       this.settings = result;
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -49,16 +53,61 @@ class PopupController {
     const fileInput = document.getElementById('base-photo');
     const removePhoto = document.getElementById('remove-photo');
 
-    uploadArea.addEventListener('click', () => fileInput.click());
+    console.log('Setting up event listeners...');
+    console.log('Upload area:', uploadArea);
+    console.log('File input:', fileInput);
+
+    uploadArea.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('Upload area clicked');
+      console.log('File input element:', fileInput);
+      console.log('File input display:', fileInput.style.display);
+      console.log('File input visibility:', fileInput.offsetParent);
+      
+      // Try multiple approaches to trigger file input
+      try {
+        fileInput.click();
+        console.log('File input click() called');
+      } catch (error) {
+        console.error('Error clicking file input:', error);
+      }
+      
+      // Alternative approach - create a new file input
+      setTimeout(() => {
+        if (!fileInput.files || fileInput.files.length === 0) {
+          console.log('File input not triggered, trying alternative approach');
+          const newFileInput = document.createElement('input');
+          newFileInput.type = 'file';
+          newFileInput.accept = 'image/*';
+          newFileInput.style.display = 'none';
+          document.body.appendChild(newFileInput);
+          
+          newFileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+              console.log('Alternative file input triggered');
+              this.handleFileUpload(e.target.files[0]);
+            }
+            document.body.removeChild(newFileInput);
+          });
+          
+          newFileInput.click();
+        }
+      }, 100);
+    });
+    
     uploadArea.addEventListener('dragover', (e) => {
       e.preventDefault();
       uploadArea.classList.add('dragover');
     });
+    
     uploadArea.addEventListener('dragleave', () => {
       uploadArea.classList.remove('dragover');
     });
+    
     uploadArea.addEventListener('drop', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       uploadArea.classList.remove('dragover');
       const files = e.dataTransfer.files;
       if (files.length > 0) {
@@ -67,12 +116,22 @@ class PopupController {
     });
 
     fileInput.addEventListener('change', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('File input changed, files:', e.target.files.length);
       if (e.target.files.length > 0) {
-        this.handleFileUpload(e.target.files[0]);
+        console.log('Processing file:', e.target.files[0].name);
+        // Use setTimeout to prevent popup from closing
+        setTimeout(() => {
+          this.handleFileUpload(e.target.files[0]);
+        }, 10);
       }
+      return false;
     });
 
-    removePhoto.addEventListener('click', () => {
+    removePhoto.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       this.removeBasePhoto();
     });
 
@@ -107,21 +166,29 @@ class PopupController {
 
     // Toggle switch
     const enabledToggle = document.getElementById('enabled');
-    enabledToggle.addEventListener('click', () => {
+    enabledToggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       this.settings.isEnabled = !this.settings.isEnabled;
       enabledToggle.classList.toggle('active', this.settings.isEnabled);
     });
 
     // Buttons
-    document.getElementById('generate-images').addEventListener('click', () => {
+    document.getElementById('generate-images').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       this.generateImages();
     });
 
-    document.getElementById('force-update').addEventListener('click', () => {
+    document.getElementById('force-update').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       this.forceUpdate();
     });
 
-    document.getElementById('save-settings').addEventListener('click', () => {
+    document.getElementById('save-settings').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       this.saveSettings();
     });
   }
@@ -149,18 +216,24 @@ class PopupController {
   }
 
   handleFileUpload(file) {
+    console.log('Handling file upload:', file.name, file.type, file.size);
+    
     if (!file.type.startsWith('image/')) {
+      console.log('Invalid file type:', file.type);
       this.showStatus('Please select an image file', 'error');
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) { // 10MB limit
+      console.log('File too large:', file.size);
       this.showStatus('File size too large (max 10MB)', 'error');
       return;
     }
 
+    console.log('File is valid, reading...');
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
+      console.log('File read successfully');
       this.settings.basePhoto = {
         name: file.name,
         data: e.target.result,
@@ -169,6 +242,14 @@ class PopupController {
       };
       this.showBasePhoto(this.settings.basePhoto);
       this.showStatus('Base photo uploaded successfully', 'success');
+
+      // ✅ Persist to chrome.storage.local immediately (larger quota)
+      try {
+        await chrome.storage.local.set({ basePhoto: this.settings.basePhoto });
+        console.log('Base photo saved to local storage');
+      } catch (err) {
+        console.error('Error saving base photo:', err);
+      }
     };
     reader.readAsDataURL(file);
   }
@@ -183,10 +264,18 @@ class PopupController {
     previewImg.src = photo.data;
   }
 
-  removeBasePhoto() {
+  async removeBasePhoto() {
     this.settings.basePhoto = null;
     document.getElementById('upload-area').classList.remove('hidden');
     document.getElementById('photo-preview').classList.add('hidden');
+    
+    // Remove from storage
+    try {
+      await chrome.storage.local.remove(['basePhoto']);
+      console.log('Base photo removed from storage');
+    } catch (err) {
+      console.error('Error removing base photo from storage:', err);
+    }
   }
 
   async generateImages() {

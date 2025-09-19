@@ -19,8 +19,10 @@ class ImageGenerationServer {
   setupMiddleware() {
     // Enable CORS for Chrome extension
     this.app.use(cors({
-      origin: ['chrome-extension://*', 'http://localhost:*'],
-      credentials: true
+      origin: true, // Allow all origins for development
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
     }));
 
     this.app.use(express.json({ limit: '50mb' }));
