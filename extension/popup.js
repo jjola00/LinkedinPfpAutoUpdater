@@ -50,50 +50,52 @@ class PopupController {
   setupEventListeners() {
     // File upload
     const uploadArea = document.getElementById('upload-area');
-    const fileInput = document.getElementById('base-photo');
     const removePhoto = document.getElementById('remove-photo');
 
     console.log('Setting up event listeners...');
     console.log('Upload area:', uploadArea);
-    console.log('File input:', fileInput);
 
-    uploadArea.addEventListener('click', (e) => {
+    uploadArea.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
       console.log('Upload area clicked');
-      console.log('File input element:', fileInput);
-      console.log('File input display:', fileInput.style.display);
-      console.log('File input visibility:', fileInput.offsetParent);
       
-      // Try multiple approaches to trigger file input
       try {
-        fileInput.click();
-        console.log('File input click() called');
-      } catch (error) {
-        console.error('Error clicking file input:', error);
-      }
-      
-      // Alternative approach - create a new file input
-      setTimeout(() => {
-        if (!fileInput.files || fileInput.files.length === 0) {
-          console.log('File input not triggered, trying alternative approach');
-          const newFileInput = document.createElement('input');
-          newFileInput.type = 'file';
-          newFileInput.accept = 'image/*';
-          newFileInput.style.display = 'none';
-          document.body.appendChild(newFileInput);
-          
-          newFileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-              console.log('Alternative file input triggered');
-              this.handleFileUpload(e.target.files[0]);
-            }
-            document.body.removeChild(newFileInput);
-          });
-          
-          newFileInput.click();
+        // Send message to content script to open file picker
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        
+        if (!tab) {
+          this.showStatus('No active tab found', 'error');
+          return;
         }
-      }, 100);
+
+        // Inject content script if not already injected
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content.js']
+          });
+        } catch (error) {
+          // Content script might already be injected, continue
+          console.log('Content script injection result:', error.message);
+        }
+
+        // Send message to content script
+        const response = await chrome.tabs.sendMessage(tab.id, { action: 'openFilePicker' });
+        
+        if (response.success) {
+          console.log('File selected:', response.file.name);
+          this.handleFileUpload(response.file);
+        } else {
+          console.log('File selection failed:', response.error);
+          if (response.error !== 'File selection cancelled') {
+            this.showStatus('File selection failed: ' + response.error, 'error');
+          }
+        }
+      } catch (error) {
+        console.error('Error opening file picker:', error);
+        this.showStatus('Error opening file picker', 'error');
+      }
     });
     
     uploadArea.addEventListener('dragover', (e) => {
@@ -113,20 +115,6 @@ class PopupController {
       if (files.length > 0) {
         this.handleFileUpload(files[0]);
       }
-    });
-
-    fileInput.addEventListener('change', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      console.log('File input changed, files:', e.target.files.length);
-      if (e.target.files.length > 0) {
-        console.log('Processing file:', e.target.files[0].name);
-        // Use setTimeout to prevent popup from closing
-        setTimeout(() => {
-          this.handleFileUpload(e.target.files[0]);
-        }, 10);
-      }
-      return false;
     });
 
     removePhoto.addEventListener('click', (e) => {

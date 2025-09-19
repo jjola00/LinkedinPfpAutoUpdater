@@ -10,6 +10,9 @@ class LinkedInAutomation {
       if (request.action === 'updateProfilePicture') {
         this.updateProfilePicture(request.imagePath, request.imageName);
         sendResponse({ success: true });
+      } else if (request.action === 'openFilePicker') {
+        this.openFilePicker().then(sendResponse);
+        return true; // Keep the message channel open for async response
       }
     });
   }
@@ -185,6 +188,52 @@ class LinkedInAutomation {
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async openFilePicker() {
+    return new Promise((resolve) => {
+      // Create a file input element
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.style.display = 'none';
+      document.body.appendChild(fileInput);
+
+      // Handle file selection
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          const file = e.target.files[0];
+          // Convert file to data URL
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const result = {
+              success: true,
+              file: {
+                name: file.name,
+                data: event.target.result,
+                size: file.size,
+                type: file.type
+              }
+            };
+            document.body.removeChild(fileInput);
+            resolve(result);
+          };
+          reader.readAsDataURL(file);
+        } else {
+          document.body.removeChild(fileInput);
+          resolve({ success: false, error: 'No file selected' });
+        }
+      });
+
+      // Handle cancellation
+      fileInput.addEventListener('cancel', () => {
+        document.body.removeChild(fileInput);
+        resolve({ success: false, error: 'File selection cancelled' });
+      });
+
+      // Trigger the file picker
+      fileInput.click();
+    });
   }
 }
 
