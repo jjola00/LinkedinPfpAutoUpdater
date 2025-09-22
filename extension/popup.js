@@ -48,80 +48,67 @@ class PopupController {
   }
 
   setupEventListeners() {
-    // File upload
+    if (this._listenersSetup) return; // prevent duplicates
+    this._listenersSetup = true;
+
     const uploadArea = document.getElementById('upload-area');
+    const fileInput = document.getElementById('base-photo');
     const removePhoto = document.getElementById('remove-photo');
 
     console.log('Setting up event listeners...');
-    console.log('Upload area:', uploadArea);
 
-    uploadArea.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      console.log('Upload area clicked');
-      
-      try {
-        // Send message to content script to open file picker
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        
-        if (!tab) {
-          this.showStatus('No active tab found', 'error');
-          return;
+    if (fileInput) {
+      fileInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    if (uploadArea) {
+      uploadArea.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Upload area clicked - triggering file input');
+        fileInput?.click();
+      });
+
+      uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+      });
+
+      uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+      });
+
+      uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.classList.remove('dragover');
+        const files = e.dataTransfer?.files || [];
+        if (files.length > 0) {
+          this.handleFileUpload(files[0]);
         }
+      });
+    }
 
-        // Inject content script if not already injected
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['content.js']
-          });
-        } catch (error) {
-          // Content script might already be injected, continue
-          console.log('Content script injection result:', error.message);
+    if (fileInput) {
+      fileInput.addEventListener('change', (e) => {
+        console.log('File input changed');
+        const file = e.target.files?.[0];
+        if (file) {
+          console.log('File selected:', file.name);
+          this.handleFileUpload(file);
         }
+      });
+    }
 
-        // Send message to content script
-        const response = await chrome.tabs.sendMessage(tab.id, { action: 'openFilePicker' });
-        
-        if (response.success) {
-          console.log('File selected:', response.file.name);
-          this.handleFileUpload(response.file);
-        } else {
-          console.log('File selection failed:', response.error);
-          if (response.error !== 'File selection cancelled') {
-            this.showStatus('File selection failed: ' + response.error, 'error');
-          }
-        }
-      } catch (error) {
-        console.error('Error opening file picker:', error);
-        this.showStatus('Error opening file picker', 'error');
-      }
-    });
-    
-    uploadArea.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      uploadArea.classList.add('dragover');
-    });
-    
-    uploadArea.addEventListener('dragleave', () => {
-      uploadArea.classList.remove('dragover');
-    });
-    
-    uploadArea.addEventListener('drop', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      uploadArea.classList.remove('dragover');
-      const files = e.dataTransfer.files;
-      if (files.length > 0) {
-        this.handleFileUpload(files[0]);
-      }
-    });
-
-    removePhoto.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.removeBasePhoto();
-    });
+    if (removePhoto) {
+      removePhoto.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.removeBasePhoto();
+      });
+    }
 
     // Number of images slider
     const numImagesSlider = document.getElementById('num-images');
@@ -205,91 +192,74 @@ class PopupController {
 
   handleFileUpload(file) {
     console.log('Handling file upload:', file.name, file.type, file.size);
-    
     if (!file.type.startsWith('image/')) {
-      console.log('Invalid file type:', file.type);
-      this.showStatus('Please select an image file', 'error');
-      return;
+      this.showStatus('Please upload an image file.', 'error'); return;
     }
-
-    if (file.size > 10 * 1024 * 1024) { // 10MB limit
-      console.log('File too large:', file.size);
-      this.showStatus('File size too large (max 10MB)', 'error');
-      return;
+    if (file.size > 10 * 1024 * 1024) {
+      this.showStatus('Max file size is 10MB.', 'error'); return;
     }
-
-    console.log('File is valid, reading...');
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      console.log('File read successfully');
-      this.settings.basePhoto = {
-        name: file.name,
-        data: e.target.result,
-        size: file.size,
-        type: file.type
-      };
-      this.showBasePhoto(this.settings.basePhoto);
-      this.showStatus('Base photo uploaded successfully', 'success');
-
-      // ✅ Persist to chrome.storage.local immediately (larger quota)
-      try {
-        await chrome.storage.local.set({ basePhoto: this.settings.basePhoto });
-        console.log('Base photo saved to local storage');
-      } catch (err) {
-        console.error('Error saving base photo:', err);
-      }
-    };
-    reader.readAsDataURL(file);
+    const form = new FormData();
+    form.append('image', file, file.name);
+    this.showStatus('Uploading base photo...', 'info');
+    fetch('http://localhost:3000/upload-base', { method: 'POST', body: form })
+      .then(r => r.json())
+      .then((j) => {
+        if (!j.ok) throw new Error(j.error || 'Upload failed');
+        this.settings.basePhoto = j.filename; // stored in temp on server
+        this.saveSettings();
+        this.showBasePhoto(URL.createObjectURL(file));
+        this.showStatus('Base photo uploaded successfully!', 'success');
+      })
+      .catch(e => {
+        console.error(e);
+        this.showStatus('Upload failed. Is the backend running?', 'error');
+      });
   }
 
-  showBasePhoto(photo) {
+  showBasePhoto(photoUrl) {
     const uploadArea = document.getElementById('upload-area');
-    const photoPreview = document.getElementById('photo-preview');
-    const previewImg = document.getElementById('preview-img');
-
-    uploadArea.classList.add('hidden');
-    photoPreview.classList.remove('hidden');
-    previewImg.src = photo.data;
+    uploadArea.style.backgroundImage = `url(${photoUrl})`;
+    uploadArea.style.backgroundSize = 'cover';
+    uploadArea.classList.add('has-image');
   }
 
   async removeBasePhoto() {
-    this.settings.basePhoto = null;
-    document.getElementById('upload-area').classList.remove('hidden');
-    document.getElementById('photo-preview').classList.add('hidden');
-    
-    // Remove from storage
     try {
+      this.settings.basePhoto = null;
+      
+      // Update UI
+      document.getElementById('upload-area').classList.remove('hidden');
+      document.getElementById('photo-preview').classList.add('hidden');
+      
+      // Remove from chrome storage
       await chrome.storage.local.remove(['basePhoto']);
       console.log('Base photo removed from storage');
-    } catch (err) {
-      console.error('Error removing base photo from storage:', err);
+      
+      // Clear file input
+      document.getElementById('base-photo').value = '';
+      
+      this.showStatus('Base photo removed', 'info');
+    } catch (error) {
+      console.error('Error removing base photo:', error);
+      this.showStatus('Error removing photo', 'error');
     }
   }
 
   async generateImages() {
-    if (!this.settings.basePhoto) {
-      this.showStatus('Please upload a base photo first', 'error');
-      return;
-    }
-
-    this.showStatus('Generating images...', 'info');
-    
     try {
-      // Send message to background script to trigger image generation
-      const response = await chrome.runtime.sendMessage({
-        action: 'generateImages',
-        basePhoto: this.settings.basePhoto,
-        numImages: this.settings.numImages
+      const count = Number(document.getElementById('num-images').value || 1);
+      this.showStatus(`Generating ${count} images...`, 'info');
+      const res = await fetch('http://localhost:3000/generate-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count })
       });
-
-      if (response.success) {
-        this.showStatus(`Generated ${this.settings.numImages} images successfully`, 'success');
-      } else {
-        this.showStatus('Error generating images: ' + response.error, 'error');
-      }
-    } catch (error) {
-      console.error('Error generating images:', error);
-      this.showStatus('Error generating images', 'error');
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'Generation failed');
+      this.showStatus(`Generated ${json.files.length} images.`, 'success');
+    } catch (e) {
+      console.error(e);
+      this.showStatus('Generation failed. Check backend logs.', 'error');
     }
   }
 
@@ -298,7 +268,7 @@ class PopupController {
     
     try {
       const response = await chrome.runtime.sendMessage({ action: 'forceUpdate' });
-      if (response.success) {
+      if (response && response.success) {
         this.showStatus('Profile picture updated successfully', 'success');
       } else {
         this.showStatus('Error updating profile picture', 'error');
@@ -309,22 +279,16 @@ class PopupController {
     }
   }
 
-  showStatus(message, type) {
-    const statusDiv = document.getElementById('status');
-    statusDiv.textContent = message;
-    statusDiv.className = `status ${type}`;
-    statusDiv.classList.remove('hidden');
-
-    // Auto-hide success messages after 3 seconds
-    if (type === 'success') {
-      setTimeout(() => {
-        statusDiv.classList.add('hidden');
-      }, 3000);
-    }
+  showStatus(message, type = 'info') {
+    const el = document.getElementById('status');
+    if (!el) return;
+    el.textContent = message;
+    el.className = `status ${type}`;
   }
 }
 
 // Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, initializing popup controller');
   new PopupController();
 });

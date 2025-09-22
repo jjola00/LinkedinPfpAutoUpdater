@@ -1,3 +1,4 @@
 .env
 
 /chopslop
+node_modules

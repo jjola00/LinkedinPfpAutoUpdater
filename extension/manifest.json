@@ -4,16 +4,15 @@
   "version": "1.0.0",
   "description": "Automatically rotate your LinkedIn profile picture on a schedule using AI-generated variations",
   
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "http://localhost:3000/*"
+  ],
   "permissions": [
     "storage",
-    "activeTab",
-    "scripting",
     "alarms",
-    "tabs"
-  ],
-  
-  "host_permissions": [
-    "https://www.linkedin.com/*"
+    "tabs",
+    "scripting"
   ],
   
   "background": {

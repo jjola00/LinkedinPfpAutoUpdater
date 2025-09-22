@@ -15,6 +15,9 @@ class LinkedInAutoUpdater {
 
     // Initialize default settings
     await this.initializeSettings();
+
+    // Schedule on startup
+    await this.scheduleNextUpdate();
   }
 
   async initializeSettings() {
@@ -48,27 +51,30 @@ class LinkedInAutoUpdater {
         return;
       }
 
-      // Get the current tab (LinkedIn)
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs.length === 0) {
-        console.log('No active tab found');
-        return;
+      // Ensure we have a LinkedIn profile tab open
+      let [tab] = await chrome.tabs.query({ url: '*://www.linkedin.com/*' });
+      if (!tab) {
+        tab = await chrome.tabs.create({ url: 'https://www.linkedin.com/in/me/' });
+      } else if (!/linkedin\.com\/in\//i.test(tab.url)) {
+        await chrome.tabs.update(tab.id, { url: 'https://www.linkedin.com/in/me/' });
       }
 
-      const currentTab = tabs[0];
-      
-      // Check if we're on LinkedIn
-      if (!currentTab.url.includes('linkedin.com')) {
-        console.log('Not on LinkedIn, skipping update');
-        return;
-      }
+      // Wait for the page to load
+      await this.waitForTabLoad(tab.id);
 
-      // Execute content script to update profile picture
-      await chrome.scripting.executeScript({
-        target: { tabId: currentTab.id },
-        function: this.updateProfilePicture,
-        args: [settings.currentImageIndex, images]
-      });
+      // Pick current image
+      const image = images[settings.currentImageIndex % images.length];
+
+      // Tell content script to update
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'updateProfilePicture',
+        imagePath: image.path,
+        imageName: image.name
+      }).catch(err => ({ success: false, error: err?.message }));
+
+      if (!response || response.success !== true) {
+        console.warn('Content script did not confirm update start:', response?.error || 'No response');
+      }
 
       // Update index for next time
       const nextIndex = (settings.currentImageIndex + 1) % images.length;
@@ -77,11 +83,23 @@ class LinkedInAutoUpdater {
         lastUpdate: Date.now()
       });
 
-      console.log('Profile picture updated successfully');
+      console.log('Profile picture update triggered');
 
     } catch (error) {
       console.error('Error during scheduled update:', error);
     }
+  }
+
+  async waitForTabLoad(tabId) {
+    return new Promise((resolve) => {
+      const listener = (updatedTabId, info) => {
+        if (updatedTabId === tabId && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
   }
 
   async getStoredImages() {
@@ -104,32 +122,11 @@ class LinkedInAutoUpdater {
     }
   }
 
-  // Function to be injected into content script
-  updateProfilePicture(imageIndex, images) {
-    // This function runs in the content script context
-    console.log('Updating profile picture with image:', images[imageIndex]);
-    
-    // Find and click the profile picture edit button
-    const editButton = document.querySelector('[data-control-name="edit_photo"]');
-    if (editButton) {
-      editButton.click();
-      
-      // Wait for modal to open, then handle file upload
-      setTimeout(() => {
-        const fileInput = document.querySelector('input[type="file"]');
-        if (fileInput) {
-          // This would need to be handled by the content script
-          // as we can't directly access local files from background script
-          console.log('File input found, ready for upload');
-        }
-      }, 1000);
-    }
-  }
-
   async scheduleNextUpdate() {
     const settings = await chrome.storage.sync.get();
     
     if (!settings.isEnabled) {
+      await chrome.alarms.clear('linkedin-profile-update');
       return;
     }
 
@@ -153,11 +150,11 @@ class LinkedInAutoUpdater {
     
     // Set new alarm
     await chrome.alarms.create('linkedin-profile-update', {
-      delayInMinutes: intervalMinutes,
+      delayInMinutes: 1, // first run soon for testing; then period applies
       periodInMinutes: intervalMinutes
     });
 
-    console.log(`Next update scheduled in ${intervalMinutes} minutes`);
+    console.log(`Next update scheduled every ${intervalMinutes} minutes`);
   }
 
   async forceUpdate() {

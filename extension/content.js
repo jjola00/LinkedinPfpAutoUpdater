@@ -10,24 +10,21 @@ class LinkedInAutomation {
       if (request.action === 'updateProfilePicture') {
         this.updateProfilePicture(request.imagePath, request.imageName);
         sendResponse({ success: true });
-      } else if (request.action === 'openFilePicker') {
-        this.openFilePicker().then(sendResponse);
-        return true; // Keep the message channel open for async response
       }
+      // Removed the openFilePicker handler since we're doing it directly in popup
     });
   }
 
   async updateProfilePicture(imagePath, imageName) {
     try {
       console.log('Starting profile picture update with:', imageName);
-      
-      // Navigate to profile edit page if not already there
-      if (!window.location.href.includes('/in/me/')) {
-        window.location.href = 'https://www.linkedin.com/in/me/';
-        await this.waitForPageLoad();
+
+      // Avoid navigating here; background should ensure correct page
+      if (!/linkedin\.com\/in\//i.test(location.href)) {
+        console.warn('Not on a LinkedIn profile page. Open your profile and try again.');
+        return;
       }
 
-      // Find and click the profile picture edit button
       const editButton = await this.findProfilePictureEditButton();
       if (!editButton) {
         throw new Error('Could not find profile picture edit button');
@@ -36,22 +33,17 @@ class LinkedInAutomation {
       editButton.click();
       await this.sleep(1000);
 
-      // Wait for the upload modal to appear
       const fileInput = await this.waitForFileInput();
       if (!fileInput) {
         throw new Error('Could not find file input');
       }
 
-      // Create a file object from the image path
       const file = await this.createFileFromPath(imagePath, imageName);
       if (!file) {
         throw new Error('Could not create file from path');
       }
 
-      // Upload the file
       await this.uploadFile(fileInput, file);
-      
-      // Wait for upload to complete and save
       await this.waitForUploadComplete();
       await this.saveChanges();
 
@@ -66,36 +58,51 @@ class LinkedInAutomation {
   async findProfilePictureEditButton() {
     const selectors = [
       '[data-control-name="edit_photo"]',
-      'button[aria-label*="photo"]',
-      'button[aria-label*="picture"]',
-      '.pv-top-card__photo-edit-button',
-      'button:contains("Edit photo")'
+      'button[aria-label*="photo" i]',
+      'button[aria-label*="picture" i]',
+      '.pv-top-card__photo-edit-button'
     ];
 
     for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (element && element.offsetParent !== null) {
-        return element;
+      try {
+        const element = document.querySelector(selector);
+        if (element && element.offsetParent !== null) {
+          return element;
+        }
+      } catch (_) {}
+    }
+
+    // Try any button near the profile picture
+    const profilePicture = document.querySelector('.pv-top-card__photo img, .profile-photo img');
+    if (profilePicture) {
+      const parent = profilePicture.closest('.pv-top-card__photo, .profile-photo') || profilePicture.parentElement;
+      if (parent) {
+        const btn = Array.from(parent.querySelectorAll('button, [role="button"]')).find(b =>
+          this.textMatches(b, ['edit photo', 'change photo', 'edit picture', 'change picture'])
+        );
+        if (btn) return btn;
       }
     }
 
-    // If not found, try to find any button near the profile picture
-    const profilePicture = document.querySelector('.pv-top-card__photo img, .profile-photo img');
-    if (profilePicture) {
-      const parent = profilePicture.closest('.pv-top-card__photo, .profile-photo');
-      if (parent) {
-        const button = parent.querySelector('button');
-        if (button) {
-          return button;
-        }
-      }
-    }
+    // Fallback: scan all buttons by text
+    const btnByText = this.findButtonByText(['edit photo', 'change photo', 'edit picture', 'change picture']);
+    if (btnByText) return btnByText;
 
     return null;
   }
 
+  findButtonByText(texts) {
+    const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+    return buttons.find(b => this.textMatches(b, texts));
+  }
+
+  textMatches(el, texts) {
+    const t = (el.textContent || '').trim().toLowerCase();
+    return texts.some(x => t.includes(x));
+  }
+
   async waitForFileInput() {
-    const maxAttempts = 10;
+    const maxAttempts = 20;
     let attempts = 0;
 
     while (attempts < maxAttempts) {
@@ -112,17 +119,14 @@ class LinkedInAutomation {
 
   async createFileFromPath(imagePath, imageName) {
     try {
-      // Fetch the image from the backend server
-      const response = await fetch(imagePath);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch image: ${response.status}`);
-      }
-      
-      const blob = await response.blob();
-      const file = new File([blob], imageName, { type: blob.type });
-      return file;
+      // imagePath should be a URL like http://localhost:3000/images/<file>
+      const res = await fetch(imagePath, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`fetch ${res.status}`);
+      const blob = await res.blob();
+      const type = blob.type || 'image/jpeg';
+      return new File([blob], imageName || 'profile.jpg', { type });
     } catch (error) {
-      console.error('Error creating file from path:', error);
+      console.error('createFileFromPath error:', error);
       return null;
     }
   }
@@ -161,15 +165,21 @@ class LinkedInAutomation {
   }
 
   async saveChanges() {
-    // Look for save button
-    const saveButton = document.querySelector('button[data-control-name="save"], button:contains("Save"), .save-button');
+    // Look for explicit save buttons by attribute or class
+    let saveButton = document.querySelector('button[data-control-name="save"], .save-button');
+    if (!saveButton) {
+      saveButton = this.findButtonByText(['save', 'apply', 'done']);
+    }
     if (saveButton) {
       saveButton.click();
       await this.sleep(2000);
     }
 
     // Also try to find and click any "Done" or "Close" button
-    const doneButton = document.querySelector('button:contains("Done"), button:contains("Close"), .done-button');
+    let doneButton = document.querySelector('.done-button');
+    if (!doneButton) {
+      doneButton = this.findButtonByText(['done', 'close']);
+    }
     if (doneButton) {
       doneButton.click();
       await this.sleep(1000);
@@ -181,59 +191,13 @@ class LinkedInAutomation {
       if (document.readyState === 'complete') {
         resolve();
       } else {
-        window.addEventListener('load', resolve);
+        window.addEventListener('load', resolve, { once: true });
       }
     });
   }
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  async openFilePicker() {
-    return new Promise((resolve) => {
-      // Create a file input element
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*';
-      fileInput.style.display = 'none';
-      document.body.appendChild(fileInput);
-
-      // Handle file selection
-      fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-          const file = e.target.files[0];
-          // Convert file to data URL
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const result = {
-              success: true,
-              file: {
-                name: file.name,
-                data: event.target.result,
-                size: file.size,
-                type: file.type
-              }
-            };
-            document.body.removeChild(fileInput);
-            resolve(result);
-          };
-          reader.readAsDataURL(file);
-        } else {
-          document.body.removeChild(fileInput);
-          resolve({ success: false, error: 'No file selected' });
-        }
-      });
-
-      // Handle cancellation
-      fileInput.addEventListener('cancel', () => {
-        document.body.removeChild(fileInput);
-        resolve({ success: false, error: 'File selection cancelled' });
-      });
-
-      // Trigger the file picker
-      fileInput.click();
-    });
   }
 }
 
