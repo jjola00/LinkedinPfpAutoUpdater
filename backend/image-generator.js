@@ -3,6 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
+const sharp = require('sharp');
 require('dotenv').config({ path: '../.env' });
 
 class ImageGenerator {
@@ -18,9 +19,12 @@ class ImageGenerator {
         ? process.env.STORAGE_PATH
         : path.join(__dirname, process.env.STORAGE_PATH)
       : defaultStorage;
-    
-    if (!this.apiKey) {
-      throw new Error('AI_API_KEY not found in environment variables');
+
+    // Local mode: generate simple variations without external API
+    this.localMode = /^1|true$/i.test(process.env.LOCAL_VARIATIONS || '');
+
+    if (!this.apiKey && !this.localMode) {
+      throw new Error('AI_API_KEY not found in environment variables (set LOCAL_VARIATIONS=1 to use local generator)');
     }
   }
 
@@ -47,17 +51,23 @@ class ImageGenerator {
 
       for (let i = 0; i < numImages; i++) {
         try {
-          // Apply rate limiting
-          await this.rateLimiter.wait();
+          // Apply rate limiting (only meaningful for API mode)
+          if (!this.localMode) await this.rateLimiter.wait();
 
           const prompt = variations[i % variations.length];
-          const imageData = await this.generateSingleImage(basePhotoBase64, prompt);
-          
+
+          let imageData;
+          if (this.localMode) {
+            imageData = await this.generateSingleImageLocal(basePhotoBuffer, i);
+          } else {
+            imageData = await this.generateSingleImage(basePhotoBase64, prompt);
+          }
+
           const filename = `generated_${Date.now()}_${i + 1}.png`;
           const filepath = path.join(this.storagePath, filename);
-          
+
           await fs.writeFile(filepath, imageData);
-          
+
           generatedImages.push({
             filename,
             filepath,
@@ -69,6 +79,19 @@ class ImageGenerator {
 
         } catch (error) {
           console.error(`Error generating image ${i + 1}:`, error.message);
+          // If API failed, attempt local fallback once
+          if (!this.localMode) {
+            try {
+              const fb = await this.generateSingleImageLocal(basePhotoBuffer, i);
+              const filename = `generated_${Date.now()}_${i + 1}.png`;
+              const filepath = path.join(this.storagePath, filename);
+              await fs.writeFile(filepath, fb);
+              generatedImages.push({ filename, filepath, prompt: 'local-fallback', generatedAt: new Date().toISOString() });
+              console.log(`Fallback (local) image ${i + 1}/${numImages}: ${filename}`);
+            } catch (e2) {
+              console.error(`Local fallback failed for image ${i + 1}:`, e2.message);
+            }
+          }
           // Continue with next image instead of failing completely
         }
       }
@@ -93,17 +116,19 @@ class ImageGenerator {
 
   async generateSingleImage(basePhotoBase64, prompt) {
     try {
+      // NOTE: OpenAI image variations typically require multipart/form-data;
+      // this JSON call may fail depending on the provider and model availability.
       const response = await axios.post(
         `${this.baseUrl}/images/variations`,
         {
           image: `data:image/png;base64,${basePhotoBase64}`,
           n: 1,
-          size: "1024x1024",
-          response_format: "b64_json"
+          size: '1024x1024',
+          response_format: 'b64_json'
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           }
         }
@@ -122,6 +147,19 @@ class ImageGenerator {
         throw new Error(`Network Error: ${error.message}`);
       }
     }
+  }
+
+  async generateSingleImageLocal(basePhotoBuffer, i) {
+    // Produce a simple but distinct variation using sharp
+    const saturation = 1 + ((i % 5) * 0.06);
+    const brightness = 1 + ((i % 3) * 0.03);
+    const hue = (i % 6) * 20; // degrees
+    const blur = (i % 4) === 0 ? 0.3 : 0;
+
+    let img = sharp(basePhotoBuffer).resize({ width: 1024, height: 1024, fit: 'cover' });
+    img = img.modulate({ saturation, brightness, hue });
+    if (blur) img = img.blur(blur);
+    return await img.png({ quality: 92 }).toBuffer();
   }
 
   generateVariationPrompts() {

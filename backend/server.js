@@ -1,23 +1,13 @@
-import express from 'express';
-import cors from 'cors';
-import multer from 'multer';
-import path from 'node:path';
-import fs from 'node:fs/promises';
-import fsSync from 'fs';
-import dotenv from 'dotenv';
-import sharp from 'sharp';
-import { ImageGenerator } from './image-generator';
+// Express server for Chrome extension communication (CommonJS)
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const { ImageGenerator } = require('./image-generator.js');
+require('dotenv').config({ path: '../.env' });
 
-dotenv.config();
-
-const app = express();
-const PORT = Number(process.env.PORT || 3000);
-const ROOT = path.resolve(process.cwd());
-const DATA_DIR = path.resolve(ROOT, 'generated-images'); // default if STORAGE_PATH missing
-const STORAGE_PATH = path.resolve(process.env.STORAGE_PATH || DATA_DIR);
-const TEMP_DIR = path.resolve(ROOT, 'temp');
-
-// Express server for Chrome extension communication
 class ImageGenerationServer {
   constructor() {
     this.app = express();
@@ -44,7 +34,7 @@ class ImageGenerationServer {
   setupMiddleware() {
     // Enable CORS for Chrome extension
     this.app.use(cors({
-      origin: true, // Allow all origins for development
+      origin: true,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -76,7 +66,7 @@ class ImageGenerationServer {
       }
     });
 
-    // New: Generate images from local base folder (no upload)
+    // Generate images from local base folder (no upload)
     this.app.post('/generate-from-base', async (req, res) => {
       try {
         await this.ensureDirectories();
@@ -108,7 +98,6 @@ class ImageGenerationServer {
 
     // Existing endpoints retained for compatibility
     this.app.post('/generate-images', this.upload.single('basePhoto'), async (req, res) => {
-      // ...existing code...
       try {
         if (!req.file) {
           return res.status(400).json({ success: false, error: 'No base photo provided' });
@@ -134,7 +123,6 @@ class ImageGenerationServer {
     });
 
     this.app.post('/generate-images-base64', async (req, res) => {
-      // ...existing code...
       try {
         const { basePhoto, numImages = 10 } = req.body;
         if (!basePhoto) {
@@ -161,7 +149,6 @@ class ImageGenerationServer {
     });
 
     this.app.get('/images', async (req, res) => {
-      // ...existing code...
       try {
         const images = await this.generator.getStoredImages();
         res.json({ success: true, count: images.length, images: images.map(img => ({ filename: img.filename, filepath: img.filepath })) });
@@ -172,7 +159,6 @@ class ImageGenerationServer {
     });
 
     this.app.get('/images/:filename', async (req, res) => {
-      // ...existing code...
       try {
         const filename = req.params.filename;
         const filepath = path.join(this.generator.storagePath, filename);
@@ -190,7 +176,6 @@ class ImageGenerationServer {
     });
 
     this.app.delete('/images', async (req, res) => {
-      // ...existing code...
       try {
         const result = await this.generator.clearStoredImages();
         if (result.success) {
@@ -230,6 +215,3 @@ if (require.main === module) {
 }
 
 module.exports = ImageGenerationServer;
-
-await fs.mkdir(STORAGE_PATH, { recursive: true });
-await fs.mkdir(TEMP_DIR, { recursive: true });

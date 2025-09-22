@@ -1,4 +1,42 @@
+# Environment
 .env
+.env.local
+.env.*
+!.env.example
+backend/.env
 
+# Project notes (local only)
 /chopslop
-node_modules
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor/OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Build/Test artifacts
+/dist/
+/build/
+/out/
+/coverage/
+
+# Backend generated assets (local only)
+backend/generated-images/
+backend/temp/
+backend/downloads/
+backend/logs/
+# User-provided base photo should not be committed
+backend/base-pfp/*
+
+# Keep directory structure if using .gitkeep files
+!backend/generated-images/.gitkeep
+!backend/temp/.gitkeep
+!backend/downloads/.gitkeep
+!backend/logs/.gitkeep
+!backend/base-pfp/.gitkeep
