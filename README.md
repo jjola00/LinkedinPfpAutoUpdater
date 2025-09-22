@@ -164,3 +164,30 @@ For issues and questions:
 2. Review Chrome extension logs
 3. Check backend server logs
 4. Open an issue on GitHub
+
+# LinkedIn Auto Profile Picture Updater
+
+## Quick Start (Local Base Photo)
+
+1. Clone repo
+2. Put your base profile photo into `backend/base-pfp/` (create the folder if it doesn't exist). Supported: .png, .jpg, .jpeg, .webp
+3. Configure environment:
+   - Create `backend/.env` (or project root `./.env`) with:
+     - `AI_API_KEY=...` (rotate if compromised)
+     - Optional: `PORT=3000`, `STORAGE_PATH=./generated-images`, `BASE_PFP_DIR=./base-pfp`
+4. Install backend deps and start server:
+   ```bash
+   cd backend
+   npm install
+   npm run dev
+   # Verify
+   curl http://localhost:3000/health
+   ```
+5. Load the Chrome extension (`extension/`) via `chrome://extensions` → Load unpacked
+6. In the popup, click "Generate Images"; this now calls the backend `POST /generate-from-base` and populates `backend/generated-images`
+7. Click "Update Now" on your LinkedIn profile tab to apply the next image
+
+## Notes
+- The popup no longer needs to upload files; avoids popup teardown issues.
+- Background/service worker requires host permission for `http://localhost:3000/*` (already set in manifest).
+- Generated images are served at `http://localhost:3000/images/<filename>`.

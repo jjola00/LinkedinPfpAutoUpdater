@@ -11,7 +11,13 @@ class ImageGenerator {
     this.baseUrl = 'https://api.openai.com/v1';
     this.rateLimiter = new RateLimiter(5, 60000); // 5 requests per minute
     this.maxImagesPerSession = 50;
-    this.storagePath = './generated-images';
+    // Use env STORAGE_PATH or default to backend/generated-images
+    const defaultStorage = path.join(__dirname, 'generated-images');
+    this.storagePath = process.env.STORAGE_PATH
+      ? path.isAbsolute(process.env.STORAGE_PATH)
+        ? process.env.STORAGE_PATH
+        : path.join(__dirname, process.env.STORAGE_PATH)
+      : defaultStorage;
     
     if (!this.apiKey) {
       throw new Error('AI_API_KEY not found in environment variables');

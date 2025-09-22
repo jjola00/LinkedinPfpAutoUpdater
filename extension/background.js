@@ -188,10 +188,52 @@ class LinkedInAutoUpdater {
       return { success: false, error: error.message };
     }
   }
+
+  async generateFromBase(numImages) {
+    try {
+      const response = await fetch(`${this.backendUrl}/generate-from-base`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numImages })
+      });
+      const result = await response.json();
+      if (result.success) {
+        console.log(`Generated ${result.count} images from base folder`);
+        return { success: true, count: result.count };
+      } else {
+        console.error('Error generating from base:', result.error);
+        return { success: false, error: result.error };
+      }
+    } catch (error) {
+      console.error('Error generating from base:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 // Initialize the auto updater
 const autoUpdater = new LinkedInAutoUpdater();
+
+/* Handles uploads so work continues after the popup closes */
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.action === 'uploadBasePhoto') {
+    (async () => {
+      try {
+        const blob = new Blob([msg.buffer], { type: msg.type || 'application/octet-stream' });
+        const form = new FormData();
+        form.append('image', blob, msg.name || 'upload.jpg');
+
+        const res = await fetch('http://localhost:3000/upload-base', { method: 'POST', body: form });
+        const json = await res.json();
+        sendResponse({ ok: res.ok && json?.ok, ...json });
+      } catch (e) {
+        console.error('uploadBasePhoto failed:', e);
+        sendResponse({ ok: false, error: String(e) });
+      }
+    })();
+    return true; // keep the message channel open for async response
+  }
+});
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -219,6 +261,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         autoUpdater.scheduleNextUpdate();
         sendResponse({ success: true });
       });
+      return true;
+    case 'generateFromBase':
+      autoUpdater.generateFromBase(request.numImages)
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
   }
 });

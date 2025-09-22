@@ -55,59 +55,23 @@ class PopupController {
     const fileInput = document.getElementById('base-photo');
     const removePhoto = document.getElementById('remove-photo');
 
-    console.log('Setting up event listeners...');
-
-    if (fileInput) {
-      fileInput.addEventListener('click', (e) => {
-        e.stopPropagation();
-      });
-    }
-
-    if (uploadArea) {
-      uploadArea.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Upload area clicked - triggering file input');
-        fileInput?.click();
-      });
-
-      uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('dragover');
-      });
-
-      uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
-      });
-
-      uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        uploadArea.classList.remove('dragover');
-        const files = e.dataTransfer?.files || [];
-        if (files.length > 0) {
-          this.handleFileUpload(files[0]);
-        }
+    if (uploadArea && fileInput) {
+      uploadArea.addEventListener('click', () => {
+        fileInput.click();
       });
     }
 
     if (fileInput) {
-      fileInput.addEventListener('change', (e) => {
-        console.log('File input changed');
-        const file = e.target.files?.[0];
-        if (file) {
-          console.log('File selected:', file.name);
-          this.handleFileUpload(file);
-        }
+      fileInput.addEventListener('change', async (e) => {
+        const [file] = e.target.files || [];
+        if (!file) return;
+        await this.handleFileUpload(file);
+        // do not depend on popup staying open
       });
     }
 
     if (removePhoto) {
-      removePhoto.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.removeBasePhoto();
-      });
+      removePhoto.addEventListener('click', () => this.removeBasePhoto());
     }
 
     // Number of images slider
@@ -190,30 +154,37 @@ class PopupController {
     }
   }
 
-  handleFileUpload(file) {
-    console.log('Handling file upload:', file.name, file.type, file.size);
-    if (!file.type.startsWith('image/')) {
-      this.showStatus('Please upload an image file.', 'error'); return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      this.showStatus('Max file size is 10MB.', 'error'); return;
-    }
-    const form = new FormData();
-    form.append('image', file, file.name);
-    this.showStatus('Uploading base photo...', 'info');
-    fetch('http://localhost:3000/upload-base', { method: 'POST', body: form })
-      .then(r => r.json())
-      .then((j) => {
-        if (!j.ok) throw new Error(j.error || 'Upload failed');
-        this.settings.basePhoto = j.filename; // stored in temp on server
-        this.saveSettings();
-        this.showBasePhoto(URL.createObjectURL(file));
-        this.showStatus('Base photo uploaded successfully!', 'success');
-      })
-      .catch(e => {
-        console.error(e);
-        this.showStatus('Upload failed. Is the backend running?', 'error');
+  async handleFileUpload(file) {
+    try {
+      if (!file.type.startsWith('image/')) {
+        this.showStatus('Please upload an image file.', 'error'); return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        this.showStatus('Max file size is 10MB.', 'error'); return;
+      }
+
+      this.showStatus('Uploading base photo...', 'info');
+
+      const buffer = await file.arrayBuffer();
+      const resp = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          { action: 'uploadBasePhoto', name: file.name, type: file.type, buffer },
+          (res) => resolve(res || { ok: false, error: chrome.runtime.lastError?.message })
+        );
       });
+
+      if (!resp?.ok) throw new Error(resp?.error || 'Upload failed');
+
+      // Save minimal state and update preview; background already stored file
+      this.settings.basePhoto = resp.filename || 'base.jpg';
+      await this.saveSettings();
+
+      this.showBasePhoto(URL.createObjectURL(file));
+      this.showStatus('Base photo uploaded successfully!', 'success');
+    } catch (e) {
+      console.error(e);
+      this.showStatus('Upload failed. Is the backend running?', 'error');
+    }
   }
 
   showBasePhoto(photoUrl) {
@@ -246,20 +217,19 @@ class PopupController {
   }
 
   async generateImages() {
+    // Prefer generating from local base folder to avoid popup upload issues
+    const num = this.settings.numImages || Number(document.getElementById('num-images')?.value) || 10;
+    this.showStatus('Generating images from base folder...', 'info');
     try {
-      const count = Number(document.getElementById('num-images').value || 1);
-      this.showStatus(`Generating ${count} images...`, 'info');
-      const res = await fetch('http://localhost:3000/generate-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count })
-      });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || 'Generation failed');
-      this.showStatus(`Generated ${json.files.length} images.`, 'success');
-    } catch (e) {
-      console.error(e);
-      this.showStatus('Generation failed. Check backend logs.', 'error');
+      const response = await chrome.runtime.sendMessage({ action: 'generateFromBase', numImages: num });
+      if (response && response.success) {
+        this.showStatus(`Generated ${response.count} images`, 'success');
+      } else {
+        this.showStatus(`Generation failed: ${response?.error || 'Unknown error'}`, 'error');
+      }
+    } catch (error) {
+      console.error('Error generating from base:', error);
+      this.showStatus('Error generating images', 'error');
     }
   }
 
